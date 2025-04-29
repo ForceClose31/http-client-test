@@ -26,6 +26,10 @@ def get_file_size():
     client.close()
 
     header = response.decode(errors='replace')
+    print("=== HEADER RESPONS HEAD ===")
+    print(header)
+    print("============================\n")
+
     for line in header.split('\r\n'):
         if line.lower().startswith("content-length:"):
             return int(line.split(":")[1].strip())
@@ -50,7 +54,15 @@ def download_range(start, end, part_index):
             break
         response += chunk
 
-    header, content = response.split(b'\r\n\r\n', 1)
+    if b'\r\n\r\n' in response:
+        header, content = response.split(b'\r\n\r\n', 1)
+        print(f"=== HEADER RESPONS PART {part_index} (bytes {start}-{end}) ===")
+        print(header.decode(errors='replace'))
+        print("=============================================================\n")
+    else:
+        print(f"Header tidak lengkap di part {part_index}")
+        header = b""
+        content = b""
 
     with open(f"part_{part_index}.tmp", 'wb') as f:
         f.write(content)
@@ -59,8 +71,9 @@ def download_range(start, end, part_index):
             if not chunk:
                 break
             f.write(chunk)
+
     client.close()
-    print(f"Part {part_index} selesai diunduh (byte {start}-{end})")
+    print(f"[INFO] Part {part_index} selesai diunduh (byte {start}-{end})")
 
 def merge_parts(output_name, total_parts):
     with open(output_name, 'wb') as output_file:
@@ -69,15 +82,15 @@ def merge_parts(output_name, total_parts):
             with open(part_name, 'rb') as part_file:
                 output_file.write(part_file.read())
             os.remove(part_name)
-    print(f"File selesai digabung menjadi {output_name}")
+    print(f"[INFO] Semua bagian digabung menjadi {output_name}")
 
 def main():
     file_size = get_file_size()
     if file_size is None:
-        print("Gagal mendapatkan ukuran file.")
+        print("[ERROR] Gagal mendapatkan ukuran file.")
         return
 
-    print(f"Ukuran file: {file_size} bytes")
+    print(f"[INFO] Ukuran file: {file_size} bytes\n")
 
     part_size = file_size // NUM_THREADS
     threads = []
@@ -85,6 +98,7 @@ def main():
     for i in range(NUM_THREADS):
         start = i * part_size
         end = (start + part_size - 1) if i < NUM_THREADS - 1 else file_size - 1
+        print(f"[INFO] Membuat thread {i} untuk byte {start} hingga {end}")
         t = threading.Thread(target=download_range, args=(start, end, i))
         threads.append(t)
         t.start()
