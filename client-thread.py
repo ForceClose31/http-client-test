@@ -1,0 +1,98 @@
+import socket
+import threading
+import os
+
+HOST = 'localhost'
+PORT = 80
+FILE_NAME = 'demo.pdf'
+NUM_THREADS = 4  
+
+def get_file_size():
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.connect((HOST, PORT))
+    request = (
+        f"HEAD /pemro-jar/files/{FILE_NAME} HTTP/1.1\r\n"
+        f"Host: {HOST}\r\n"
+        f"Connection: close\r\n"
+        "\r\n"
+    )
+    client.sendall(request.encode())
+    response = b""
+    while True:
+        chunk = client.recv(1024)
+        if not chunk:
+            break
+        response += chunk
+    client.close()
+
+    header = response.decode(errors='replace')
+    for line in header.split('\r\n'):
+        if line.lower().startswith("content-length:"):
+            return int(line.split(":")[1].strip())
+    return None
+
+def download_range(start, end, part_index):
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client.connect((HOST, PORT))
+    request = (
+        f"GET /pemro-jar/files/{FILE_NAME} HTTP/1.1\r\n"
+        f"Host: {HOST}\r\n"
+        f"Range: bytes={start}-{end}\r\n"
+        f"Connection: close\r\n"
+        "\r\n"
+    )
+    client.sendall(request.encode())
+    response = b""
+
+    while b'\r\n\r\n' not in response:
+        chunk = client.recv(1024)
+        if not chunk:
+            break
+        response += chunk
+
+    header, content = response.split(b'\r\n\r\n', 1)
+
+    with open(f"part_{part_index}.tmp", 'wb') as f:
+        f.write(content)
+        while True:
+            chunk = client.recv(1024)
+            if not chunk:
+                break
+            f.write(chunk)
+    client.close()
+    print(f"Part {part_index} selesai diunduh (byte {start}-{end})")
+
+def merge_parts(output_name, total_parts):
+    with open(output_name, 'wb') as output_file:
+        for i in range(total_parts):
+            part_name = f"part_{i}.tmp"
+            with open(part_name, 'rb') as part_file:
+                output_file.write(part_file.read())
+            os.remove(part_name)
+    print(f"File selesai digabung menjadi {output_name}")
+
+def main():
+    file_size = get_file_size()
+    if file_size is None:
+        print("Gagal mendapatkan ukuran file.")
+        return
+
+    print(f"Ukuran file: {file_size} bytes")
+
+    part_size = file_size // NUM_THREADS
+    threads = []
+
+    for i in range(NUM_THREADS):
+        start = i * part_size
+        end = (start + part_size - 1) if i < NUM_THREADS - 1 else file_size - 1
+        t = threading.Thread(target=download_range, args=(start, end, i))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    merge_parts(f"downloaded_{FILE_NAME}", NUM_THREADS)
+
+if __name__ == "__main__":
+    main()
